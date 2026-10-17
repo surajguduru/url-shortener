@@ -1,14 +1,23 @@
-import os
-
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg://shortener:shortener@localhost:5432/shortener",
-)
+from app.config import settings
 
-engine = create_engine(DATABASE_URL)
+DB_CONNECT_TIMEOUT_SECONDS = 3
+
+
+def _engine_options(database_url: str) -> dict:
+    if not database_url.startswith("postgresql"):
+        return {}  # SQLite in tests
+    return {
+        "pool_pre_ping": True,
+        "pool_size": 5,
+        "max_overflow": 5,
+        "connect_args": {"connect_timeout": DB_CONNECT_TIMEOUT_SECONDS},
+    }
+
+
+engine = create_engine(settings.database_url, **_engine_options(settings.database_url))
 SessionLocal = sessionmaker(bind=engine, autoflush=False)
 
 
@@ -22,3 +31,12 @@ def get_session():
         yield session
     finally:
         session.close()
+
+
+def database_is_reachable() -> bool:
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
