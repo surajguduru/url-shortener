@@ -1,0 +1,7 @@
+apiVersion: v2
+name: url-shortener
+description: URL shortener (FastAPI) with an optional in-cluster PostgreSQL
+type: application
+version: 0.1.0
+# The deployed application version is values.image.tag; appVersion is only the default.
+appVersion: "dev"

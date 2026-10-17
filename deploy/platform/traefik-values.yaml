@@ -1,0 +1,12 @@
+# Ingress controller. Exposed as a NodePort that kind maps to 127.0.0.1:8080.
+service:
+  type: NodePort
+ports:
+  web:
+    nodePort: 30080
+  websecure:
+    expose:
+      default: false
+ingressClass:
+  enabled: true
+  isDefaultClass: true

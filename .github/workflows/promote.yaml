@@ -1,0 +1,49 @@
+# CD: promote an already-built, already-scanned image to the local environment.
+# The job only changes Git (image.tag in the environment values file); Argo CD
+# running in the cluster notices the commit and rolls it out. The "local"
+# GitHub Environment has a required reviewer, which is the manual approval gate.
+# Rollback = run this again with the previous tag (or `git revert` the release commit).
+name: promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (e.g. sha-1a2b3c4 or v1.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promote-local
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/url-shortener
+  VALUES_FILE: deploy/environments/local/values.yaml
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: local
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate tag format
+        env:
+          TAG: ${{ inputs.image_tag }}
+        run: '[[ "$TAG" =~ ^(sha-[0-9a-f]{7}|v[0-9]+\.[0-9]+\.[0-9]+)$ ]] || { echo "invalid tag: $TAG"; exit 1; }'
+      - name: Verify the image exists (only CI-built images can be released)
+        run: docker manifest inspect "${IMAGE}:${{ inputs.image_tag }}" > /dev/null
+      - name: Update release pointer
+        env:
+          TAG: ${{ inputs.image_tag }}
+        run: |
+          previous=$(yq '.image.tag' "$VALUES_FILE")
+          yq -i ".image.tag = \"$TAG\"" "$VALUES_FILE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "release(local): ${previous} -> ${TAG}" \
+            -m "Requested by ${GITHUB_ACTOR} via run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          git push
+          echo "Promoted \`${previous}\` → \`${TAG}\` on \`${GITHUB_REF_NAME}\`. Argo CD will sync it." >> "$GITHUB_STEP_SUMMARY"

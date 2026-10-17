@@ -1,0 +1,32 @@
+# GitOps: Argo CD (inside the cluster) pulls the desired state from Git.
+# A local kind cluster is not reachable from GitHub-hosted CI runners, so a
+# pull-based deployer avoids exposing the API server or storing a kubeconfig
+# in CI. Git is the source of truth: release = commit that changes image.tag,
+# rollback = revert that commit, drift = Argo shows OutOfSync and self-heals.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: url-shortener
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/surajguduru/url-shortener.git
+    # The branch Argo tracks. "devops" while the PR is under review; "main" after merge.
+    targetRevision: devops
+    path: charts/url-shortener
+    helm:
+      releaseName: url-shortener
+      valueFiles:
+        - ../../deploy/environments/local/values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: shortener
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 3
+      backoff: { duration: 10s, factor: 2, maxDuration: 2m }
+  revisionHistoryLimit: 10

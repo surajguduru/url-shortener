@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "shortener.name" . }}
+  labels:
+    {{- include "shortener.labels" . | nindent 4 }}
+    {{- include "shortener.appSelector" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "shortener.appSelector" . | nindent 4 }}
+  ports:
+    - { name: http, port: {{ .Values.service.port }}, targetPort: http }
+    # Scraped by Prometheus only; the Ingress routes to the http port alone.
+    - { name: metrics, port: 9000, targetPort: metrics }

@@ -1,0 +1,11 @@
+configs:
+  params:
+    # TLS terminates at the ingress (plain HTTP on localhost for this project).
+    server.insecure: true
+server:
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hostname: argocd.localhost
+dex: { enabled: false }
+notifications: { enabled: false }
