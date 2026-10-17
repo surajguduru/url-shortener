@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>URL Shortener</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 560px; margin: 4rem auto; padding: 0 16px; }
+    form { display: flex; gap: 8px; }
+    input { flex: 1; padding: 8px; font-size: 1rem; }
+    button { padding: 8px 16px; font-size: 1rem; }
+    #result { margin-top: 1.5rem; }
+    .error { color: #b00020; }
+  </style>
+</head>
+<body>
+  <h1>URL Shortener</h1>
+  <form id="shorten">
+    <input id="url" type="url" placeholder="https://example.com/a/very/long/path" required>
+    <button type="submit">Shorten</button>
+  </form>
+  <div id="result"></div>
+  <script>
+    document.getElementById("shorten").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const result = document.getElementById("result");
+      const response = await fetch("/api/links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: document.getElementById("url").value }),
+      });
+      if (!response.ok) {
+        result.innerHTML = '<p class="error">Could not shorten that URL.</p>';
+        return;
+      }
+      const link = await response.json();
+      const shortUrl = `${location.origin}/${link.code}`;
+      result.innerHTML = `<p>Short link: <a href="${shortUrl}">${shortUrl}</a></p>`;
+    });
+  </script>
+</body>
+</html>
