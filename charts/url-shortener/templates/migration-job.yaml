@@ -1,0 +1,54 @@
+{{- if .Values.migrations.enabled }}
+# Applies Alembic migrations before new app pods roll out.
+# - Argo CD: a Sync hook in wave 1, i.e. after Postgres (wave 0) is healthy and
+#   before the Deployment (wave 2).
+# - Plain Helm: post-install (the DB must exist first) and pre-upgrade (schema
+#   is migrated before new code starts). Migrations must stay backward
+#   compatible with the previous app version so rollbacks remain safe.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "shortener.name" . }}-migrate
+  labels: {{- include "shortener.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    helm.sh/hook: post-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: url-shortener-migrate
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "shortener.name" . }}
+      automountServiceAccountToken: false
+      securityContext: {{- include "shortener.podSecurityContext" . | nindent 8 }}
+      initContainers:
+        - name: wait-for-db
+          image: {{ include "shortener.image" . }}
+          command: ["python", "-m", "app.wait_for_db"]
+          envFrom:
+            - configMapRef: { name: {{ include "shortener.name" . }}-config }
+          env: {{- include "shortener.dbEnv" . | nindent 12 }}
+          securityContext: {{- include "shortener.containerSecurityContext" . | nindent 12 }}
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 128Mi } }
+      containers:
+        - name: migrate
+          image: {{ include "shortener.image" . }}
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef: { name: {{ include "shortener.name" . }}-config }
+          env:
+            {{- include "shortener.dbEnv" . | nindent 12 }}
+            - { name: OTEL_SDK_DISABLED, value: "true" }
+          securityContext: {{- include "shortener.containerSecurityContext" . | nindent 12 }}
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 256Mi } }
+{{- end }}
