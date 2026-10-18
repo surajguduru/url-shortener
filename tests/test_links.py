@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+from prometheus_client import generate_latest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -62,3 +63,36 @@ def test_index_page_served(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "URL Shortener" in response.text
+
+
+def test_healthz_does_not_need_database(client):
+    assert client.get("/healthz").json() == {"status": "ok"}
+
+
+def test_readyz_reports_database_down(client, monkeypatch):
+    monkeypatch.setattr("app.main.database_is_reachable", lambda: False)
+    response = client.get("/readyz")
+    assert response.status_code == 503
+    assert response.json()["database"] == "down"
+
+
+def test_readyz_ok_when_database_up(client, monkeypatch):
+    monkeypatch.setattr("app.main.database_is_reachable", lambda: True)
+    assert client.get("/readyz").status_code == 200
+
+
+def test_version_is_reported_in_body_and_header(client):
+    response = client.get("/version")
+    assert response.json()["version"] == "test"
+    assert response.headers["x-app-version"] == "test"
+
+
+def test_metrics_use_route_templates(client):
+    code = client.post("/api/links", json={"url": "https://example.com/"}).json()["code"]
+    client.get(f"/{code}", follow_redirects=False)
+
+    metrics = generate_latest().decode()
+    assert 'http_requests_total{method="GET",route="/{code}",status="307"}' in metrics
+    assert f'route="/{code}"' not in metrics
+    assert "shortener_links_created_total" in metrics
+    assert 'shortener_redirects_total{result="hit"}' in metrics

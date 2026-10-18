@@ -1,0 +1,75 @@
+{{- if .Values.metrics.prometheusRules }}
+{{- $job := include "shortener.name" . }}
+{{- $ns := .Release.Namespace }}
+# SLOs (see docs/RUNBOOK.md for what to do when each alert fires):
+#   Availability: 99.5% of requests over 30 days are not 5xx (4xx are client errors).
+#   Latency:      95% of redirects complete in under 250 ms.
+# Burn-rate alerts follow the Google SRE workbook multi-window pattern.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "shortener.name" . }}
+  labels: {{- include "shortener.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: shortener.recording
+      rules:
+        {{- range $window := list "5m" "30m" "1h" "6h" }}
+        - record: shortener:error_ratio:rate{{ $window }}
+          expr: |
+            # "or vector(0)": with no 5xx at all the numerator has no series, and
+            # the ratio would be empty ("No data") instead of 0.
+            (sum(rate(http_requests_total{job="{{ $job }}",namespace="{{ $ns }}",status=~"5.."}[{{ $window }}])) or vector(0))
+            /
+            clamp_min(sum(rate(http_requests_total{job="{{ $job }}",namespace="{{ $ns }}"}[{{ $window }}])), 1e-9)
+        {{- end }}
+        - record: shortener:redirect_fast_ratio:rate10m
+          expr: |
+            sum(rate(http_request_duration_seconds_bucket{job="{{ $job }}",namespace="{{ $ns }}",route="/{code}",le="0.25"}[10m]))
+            /
+            clamp_min(sum(rate(http_request_duration_seconds_count{job="{{ $job }}",namespace="{{ $ns }}",route="/{code}"}[10m])), 1e-9)
+    - name: shortener.alerts
+      rules:
+        - alert: ShortenerErrorBudgetFastBurn
+          # 14.4x burn: 2% of the 30-day budget gone in 1 hour.
+          expr: shortener:error_ratio:rate1h > (14.4 * 0.005) and shortener:error_ratio:rate5m > (14.4 * 0.005)
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "URL shortener is burning its error budget fast (5xx ratio {{`{{ $value | humanizePercentage }}`}})"
+            runbook: docs/RUNBOOK.md#shortenererrorbudgetfastburn
+        - alert: ShortenerErrorBudgetSlowBurn
+          expr: shortener:error_ratio:rate6h > (6 * 0.005) and shortener:error_ratio:rate30m > (6 * 0.005)
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "URL shortener 5xx ratio is elevated over 6h"
+            runbook: docs/RUNBOOK.md#shortenererrorbudgetslowburn
+        - alert: ShortenerRedirectLatencyHigh
+          expr: shortener:redirect_fast_ratio:rate10m < 0.95 and sum(rate(http_request_duration_seconds_count{job="{{ $job }}",namespace="{{ $ns }}",route="/{code}"}[10m])) > 0
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Fewer than 95% of redirects are under 250ms"
+            runbook: docs/RUNBOOK.md#shortenerredirectlatencyhigh
+        - alert: ShortenerNoReadyPods
+          expr: kube_deployment_status_replicas_available{namespace="{{ $ns }}",deployment="{{ $job }}"} == 0
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "No URL shortener pods are Ready; users get errors from the ingress"
+            runbook: docs/RUNBOOK.md#shortenernoreadypods
+        - alert: ShortenerDatabaseDown
+          expr: kube_statefulset_status_replicas_ready{namespace="{{ $ns }}",statefulset="{{ $job }}-postgres"} == 0
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "PostgreSQL for the URL shortener has no ready replica"
+            runbook: docs/RUNBOOK.md#shortenerdatabasedown
+        - alert: ShortenerMigrationFailed
+          expr: kube_job_status_failed{namespace="{{ $ns }}",job_name="{{ $job }}-migrate"} > 0
+          labels: { severity: warning }
+          annotations:
+            summary: "Database migration job failed; the rollout is blocked"
+            runbook: docs/RUNBOOK.md#shortenermigrationfailed
+{{- end }}

@@ -1,0 +1,20 @@
+# Ingress controller. Exposed as a NodePort that kind maps to 127.0.0.1:8080.
+service:
+  type: NodePort
+ports:
+  web:
+    nodePort: 30080
+  websecure:
+    expose:
+      default: false
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+# Write an address into each Ingress's status. Without it, Argo CD's Ingress
+# health check never turns Healthy and later sync waves never start.
+additionalArguments:
+  - --providers.kubernetesingress.ingressendpoint.ip=127.0.0.1
+providers:
+  kubernetesIngress:
+    publishedService:
+      enabled: false   # a NodePort service has no address to publish; use the IP above

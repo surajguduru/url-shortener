@@ -1,0 +1,15 @@
+# Local cluster: 1 control plane + 2 workers so replica spreading, PDBs and
+# node-drain behaviour are observable. Only the ingress NodePort is published
+# to the host, on 127.0.0.1 so nothing is exposed to the LAN.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: shortener
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080   # Traefik "web" NodePort
+        hostPort: 8080
+        listenAddress: 127.0.0.1
+        protocol: TCP
+  - role: worker
+  - role: worker

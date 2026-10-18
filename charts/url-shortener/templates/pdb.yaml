@@ -1,0 +1,12 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+# Keeps at least one app pod serving during voluntary disruptions (node drain).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "shortener.name" . }}
+  labels: {{- include "shortener.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels: {{- include "shortener.appSelector" . | nindent 6 }}
+{{- end }}

@@ -1,0 +1,76 @@
+# Defaults are production-leaning; environment overlays in deploy/environments/*
+# override only what differs, so there is one chart and no drifting copies.
+
+image:
+  repository: ghcr.io/surajguduru/url-shortener
+  tag: ""            # set per environment; falls back to Chart.appVersion
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+logLevel: INFO
+
+strategy:
+  # Zero-downtime rolling update: add one new pod, only remove an old one
+  # once the new one is Ready.
+  maxSurge: 1
+  maxUnavailable: 0
+
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits: { memory: 256Mi }   # no CPU limit: avoids throttling; requests drive scheduling/HPA
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+service:
+  port: 80
+
+ingress:
+  enabled: true
+  className: traefik
+  host: shortener.localhost
+
+tracing:
+  enabled: true
+  otlpEndpoint: http://jaeger.observability.svc.cluster.local:4317
+
+metrics:
+  serviceMonitor: true
+  prometheusRules: true
+  dashboard: true
+
+networkPolicy:
+  enabled: true
+  ingressControllerNamespace: traefik
+  monitoringNamespace: monitoring
+  tracingNamespace: observability
+
+# Database credentials live in a Secret created outside the chart
+# (scripts/create-secrets.sh); the chart only references it.
+database:
+  existingSecret: url-shortener-db
+  name: shortener
+  # Used when postgres.enabled=false (e.g. a managed database).
+  externalHost: ""
+  port: 5432
+
+postgres:
+  enabled: true
+  image: postgres:16.10-alpine
+  storage:
+    size: 1Gi
+    storageClassName: ""   # cluster default
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+migrations:
+  enabled: true

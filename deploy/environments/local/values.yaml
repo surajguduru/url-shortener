@@ -1,0 +1,10 @@
+# Local kind environment. Only differences from the chart defaults live here.
+# image.tag is the release pointer: the promote workflow changes it, Argo CD deploys it.
+image:
+  tag: "sha-f46ac40"
+resources:
+  requests: {cpu: 50m, memory: 96Mi}
+  limits: {memory: 256Mi}
+postgres:
+  storage:
+    size: 1Gi

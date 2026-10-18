@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "shortener.name" . }}-config
+  labels: {{- include "shortener.labels" . | nindent 4 }}
+data:
+  DB_HOST: {{ include "shortener.dbHost" . | quote }}
+  DB_PORT: {{ .Values.database.port | quote }}
+  DB_NAME: {{ .Values.database.name | quote }}
+  METRICS_PORT: "9000"
+  LOG_LEVEL: {{ .Values.logLevel | quote }}
+  {{- if .Values.tracing.enabled }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.tracing.otlpEndpoint | quote }}
+  {{- end }}

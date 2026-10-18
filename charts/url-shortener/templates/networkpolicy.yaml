@@ -1,0 +1,83 @@
+{{- if .Values.networkPolicy.enabled }}
+# Default deny for every pod in the namespace, then allow only the flows the
+# request path needs: ingress controller -> app, Prometheus -> app metrics,
+# app/migrations -> Postgres, app -> Jaeger, and DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "shortener.name" . }}-default-deny
+  labels: {{- include "shortener.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "shortener.name" . }}-app
+  labels: {{- include "shortener.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "shortener.appSelector" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace }} }
+      ports: [{ port: http }]
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }} }
+      ports: [{ port: metrics }]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {{- include "shortener.dbSelector" . | nindent 14 }}
+      ports: [{ port: 5432 }]
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Values.networkPolicy.tracingNamespace }} }
+      ports: [{ port: 4317 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "shortener.name" . }}-migrate
+  labels: {{- include "shortener.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: url-shortener-migrate }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {{- include "shortener.dbSelector" . | nindent 14 }}
+      ports: [{ port: 5432 }]
+{{- if .Values.postgres.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "shortener.name" . }}-postgres
+  labels: {{- include "shortener.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "shortener.dbSelector" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "shortener.appSelector" . | nindent 14 }}
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: url-shortener-migrate }
+      ports: [{ port: 5432 }]
+{{- end }}
+{{- end }}

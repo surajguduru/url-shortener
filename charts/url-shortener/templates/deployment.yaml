@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "shortener.name" . }}
+  labels:
+    {{- include "shortener.labels" . | nindent 4 }}
+    {{- include "shortener.appSelector" . | nindent 4 }}
+    app.kubernetes.io/version: {{ include "shortener.imageTag" . | quote }}
+  annotations:
+    # Argo CD: start the rollout only after the database and migrations are done.
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  minReadySeconds: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: {{ .Values.strategy.maxSurge }}
+      maxUnavailable: {{ .Values.strategy.maxUnavailable }}
+  selector:
+    matchLabels: {{- include "shortener.appSelector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "shortener.appSelector" . | nindent 8 }}
+        app.kubernetes.io/version: {{ include "shortener.imageTag" . | quote }}
+      annotations:
+        # Roll pods when config changes, not only when the image changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "shortener.name" . }}
+      automountServiceAccountToken: false
+      securityContext: {{- include "shortener.podSecurityContext" . | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "shortener.appSelector" . | nindent 14 }}
+      containers:
+        - name: app
+          image: {{ include "shortener.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8000 }
+            - { name: metrics, containerPort: 9000 }
+          envFrom:
+            - configMapRef: { name: {{ include "shortener.name" . }}-config }
+          env:
+            {{- include "shortener.dbEnv" . | nindent 12 }}
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 4
+            failureThreshold: 2
+          lifecycle:
+            # Give endpoints/ingress time to stop routing here before SIGTERM.
+            preStop:
+              sleep: { seconds: 5 }
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext: {{- include "shortener.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 16Mi }
