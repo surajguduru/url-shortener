@@ -5,20 +5,81 @@ are included so each result can be reproduced.
 
 - **Environment:** kind v0.33.0 (Kubernetes v1.37.0, 3 nodes), Docker 29.5.2,
   Helm 4.3.1, macOS (arm64).
-- **Baseline:** `fd7d63e`. **PR branch:** `devops`.
+- **Baseline:** `fd7d63e` (tag `baseline`). **Main PR:** #1 (`devops`); follow-ups #2–#4 (Argo CD target, promote fix, operational fixes + this evidence).
 
-## 1. Source → CI → image
+## 1. Source → CI → image → approval → Git → Argo CD → running pods
 
-> Filled in after the branch is pushed. You need: the CI run URL for the final
-> commit, the image tag it pushed (`sha-xxxxxxx`), and the promote run URL.
+This is one traced release, carried out on 18 October 2026 with real runs:
 
-| Item | Value |
+| Step | Evidence |
 |---|---|
-| Final commit | _pending push_ |
-| CI run (all jobs green) | _pending push_ |
-| Image | `ghcr.io/surajguduru/url-shortener:sha-…` |
-| Promote run (with approval) | _pending push_ |
-| Release commit created by promote | _pending push_ |
+| Source commit | `f46ac40` (merge of PR #3) on `main` |
+| CI run (4/4 jobs green: tests, chart, security scan, build+image scan+push) | [actions/runs/39134320654](https://github.com/surajguduru/url-shortener/actions/runs/39134320654) |
+| Image published | `ghcr.io/surajguduru/url-shortener:sha-f46ac40` (public, OCI revision label `f46ac40`) |
+| Promote run: waited for the required reviewer on the `local` environment, then approved | [actions/runs/39134454760](https://github.com/surajguduru/url-shortener/actions/runs/39134454760) |
+| Release commit written by promote | `3ad41e3 release(local): dev -> sha-f46ac40` |
+| CI on the release commit | Correctly **skipped** (`paths-ignore: deploy/environments/**`); nothing new to build |
+| Argo CD sync | `Synced / Healthy`, revision `3ad41e3`, "successfully synced (all tasks run)". Waves: Postgres → migration Job `Complete` → Deployment rolled |
+| Running version | Deployment image `…:sha-f46ac40`; `X-App-Version: sha-f46ac40` |
+
+```
+$ make smoke
+version: {"version":"sha-f46ac40","commit":"f46ac40"}
+created: {"code":"uhfPVEl","target_url":"https://example.com/smoke-test","clicks":0,...}
+redirect: /uhfPVEl -> https://example.com/smoke-test
+clicks: 1
+unknown code: 404
+SMOKE TEST PASSED
+```
+
+Other green CI runs: [PR #1](https://github.com/surajguduru/url-shortener/actions/runs/39038103987),
+[main after PR #1](https://github.com/surajguduru/url-shortener/actions/runs/39038225115),
+[PR #3](https://github.com/surajguduru/url-shortener/actions/runs/39134121054).
+PR builds are scanned but never pushed.
+
+### Rollback through Git, under live traffic
+
+Here `sha-f46ac40` was treated as a bad release and rolled back by promoting the
+previous image, while a loop sent a redirect and a `/version` request every 100 ms:
+
+| Time (UTC) | Event |
+|---|---|
+| 14:37:43 | Rollback promote approved and completed: [actions/runs/39135507475](https://github.com/surajguduru/url-shortener/actions/runs/39135507475), commit `daa7c35 release(local): sha-f46ac40 -> sha-ebfc4eb` |
+| 14:38:14 | Argo CD applied `…:sha-ebfc4eb` |
+| 14:38:43 | Rollout complete: **about 60 s from approval to fully rolled back** |
+
+```
+responses during rollback (status, serving version):
+ 6515 307 sha-f46ac40
+  146 307 sha-ebfc4eb
+```
+
+That's **6,661 / 6,661 requests successful**, and the serving version switches
+partway through. Afterwards it was rolled forward again with the same mechanism
+([actions/runs/39136945528](https://github.com/surajguduru/url-shortener/actions/runs/39136945528)).
+Every release and rollback is a Git commit naming who requested it and which
+run did it.
+
+### Drift detection and self-heal
+
+```
+14:19:34 manual change: kubectl patch configmap url-shortener-config LOG_LEVEL=DEBUG
+14:19:36 LOG_LEVEL is back to: INFO          ← Argo CD reverted it to what Git says (~2 s)
+```
+
+### Promote safety: a race found and fixed
+
+The first promote run ([39129440519](https://github.com/surajguduru/url-shortener/actions/runs/39129440519))
+was dispatched while `main` was at `ebfc4eb`, and approved after PR #2 had moved
+`main`. Its push was rejected:
+
+```
+[main 12f195b] release(local): dev -> sha-ebfc4eb
+ ! [rejected]        main -> main (fetch first)
+```
+
+It failed safely, so nothing half-applied. PR #3 fixed it: the workflow now
+checks out the branch tip *after* approval and rebases before pushing.
 
 Local equivalents of the CI gates, run before pushing:
 
@@ -148,7 +209,23 @@ PDB  url-shortener  minAvailable 1  allowedDisruptions 1
 PVC  data-url-shortener-postgres-0  Bound  1Gi  RWO  standard
 ```
 
-## 9. Bugs the pipeline itself caught during development
+## 9. Bugs found while operating the system
+
+- **Argo CD stuck "Progressing" on the Ingress.** Argo CD only calls an Ingress
+  healthy once the controller writes an address into `status`. Traefik behind a
+  NodePort wrote none, so the sync waiting on wave 0 never reached the migration
+  or the Deployment. The fix is in `deploy/platform/traefik-values.yaml`: publish
+  `127.0.0.1`, which is the address it really serves on.
+- **"Availability" showed "No data" when healthy.** With zero 5xx responses, the
+  error-ratio numerator has no series, so the ratio was empty instead of 0. The
+  fix is `(… or vector(0))` in the recording rules. The alerts weren't affected
+  (an empty result never fires), but the dashboard was misleading exactly when
+  things were fine.
+- **A transient `Degraded`** right after a rollout: the HPA showed
+  `cpu: <unknown>` until metrics-server had a sample for the new pods (about
+  1 minute), then returned to Healthy. It's expected behaviour, not a fault.
+
+## 10. Bugs the pipeline itself caught during development
 
 - The migration Job failed on first deploy with `ModuleNotFoundError: No module named 'app'`,
   because the `alembic` CLI doesn't add the working directory to `sys.path`. The

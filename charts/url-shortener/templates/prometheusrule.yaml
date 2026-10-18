@@ -17,7 +17,9 @@ spec:
         {{- range $window := list "5m" "30m" "1h" "6h" }}
         - record: shortener:error_ratio:rate{{ $window }}
           expr: |
-            sum(rate(http_requests_total{job="{{ $job }}",namespace="{{ $ns }}",status=~"5.."}[{{ $window }}]))
+            # "or vector(0)": with no 5xx at all the numerator has no series, and
+            # the ratio would be empty ("No data") instead of 0.
+            (sum(rate(http_requests_total{job="{{ $job }}",namespace="{{ $ns }}",status=~"5.."}[{{ $window }}])) or vector(0))
             /
             clamp_min(sum(rate(http_requests_total{job="{{ $job }}",namespace="{{ $ns }}"}[{{ $window }}])), 1e-9)
         {{- end }}
