@@ -5,7 +5,10 @@ system that is built, scanned, released through GitOps, run on Kubernetes, and
 observable with metrics, logs and traces.
 
 - **Baseline commit:** `fd7d63e` (tag `baseline`): the app before any DevOps work.
-- **All improvements:** one pull request from `devops` into `main`.
+- **All improvements:** PR #1 (`devops` → `main`). Small follow-ups after running
+  the real release flow: #2 (Argo CD tracks `main`), #3 (promote race fix),
+  #4 (Ingress health and SLO rule fixes, evidence). Release commits
+  `release(local): …` on `main` are written by the promote workflow.
 - Design decisions and trade-offs: [docs/DESIGN.md](docs/DESIGN.md)
 - Alert response and recovery checks: [docs/RUNBOOK.md](docs/RUNBOOK.md)
 - Verification evidence: [docs/EVIDENCE.md](docs/EVIDENCE.md)
@@ -169,3 +172,5 @@ export DATABASE_URL=postgresql+psycopg://shortener:shortener@localhost:5432/shor
 - Alertmanager has no receiver configured (no email or Slack). Alerts show in the
   Alertmanager and Prometheus UIs.
 - GitHub can't reach a laptop cluster, which is why CD is pull-based (Argo CD).
+  For the same reason there's no Git webhook, so Argo CD notices a release on
+  its 3-minute poll. Use `argocd app sync` or a refresh to apply it sooner.
