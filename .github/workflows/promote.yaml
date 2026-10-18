@@ -28,7 +28,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: local
     steps:
+      # Check out the branch tip *now* (after approval), not the commit the run
+      # was dispatched on: the branch may have moved while waiting for approval.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
       - name: Validate tag format
         env:
           TAG: ${{ inputs.image_tag }}
@@ -45,5 +49,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "release(local): ${previous} -> ${TAG}" \
             -m "Requested by ${GITHUB_ACTOR} via run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          git push
+          # Safety net if something lands between checkout and push.
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"
           echo "Promoted \`${previous}\` → \`${TAG}\` on \`${GITHUB_REF_NAME}\`. Argo CD will sync it." >> "$GITHUB_STEP_SUMMARY"
