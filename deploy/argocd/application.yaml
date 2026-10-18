@@ -12,8 +12,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/surajguduru/url-shortener.git
-    # The branch Argo tracks. "devops" while the PR is under review; "main" after merge.
-    targetRevision: devops
+    targetRevision: main
     path: charts/url-shortener
     helm:
       releaseName: url-shortener
