@@ -7,6 +7,10 @@ on:
   push:
     branches: [main, devops]
     tags: ["v*"]
+    # Release commits from promote.yaml only move the image tag; there is
+    # nothing new to test or build.
+    paths-ignore:
+      - "deploy/environments/**"
   pull_request:
     branches: [main]
 
